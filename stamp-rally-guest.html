@@ -366,26 +366,26 @@ loadScriptWithFallback([
 // ▼▼▼ 会場リストはここを直接編集してください（このアプリ全員共通の設定です） ▼▼▼
 const TOUR_NAME = '死んでも夏休みツアー 3markets[ ]';
 const VENUES = [
-  { id: 'osaka0802',    name: '08/02 大阪 UMEDA CLUB QUATTRO' },
-  { id: 'nagoya0807',   name: '08/07 名古屋 新栄シャングリラ' },
-  { id: 'tokyo0824',    name: '08/24 東京 Zepp Shinjuku' },
-  { id: 'sendai0904',   name: '09/04 仙台 ROCKATERIA' },
-  { id: 'morioka0905',  name: '09/05 盛岡 the five morioka' },
-  { id: 'sapporo0920',  name: '09/20 札幌 KLUB COUNTER ACTION' },
-  { id: 'shizuoka0911', name: '09/11 静岡 UMBER' },
-  { id: 'chiba0923',    name: '09/23 千葉 LOOK' },
-  { id: 'takamatsu1001',name: '10/01 高松 TOONICE' },
-  { id: 'hiroshima1003',name: '10/03 広島 SIX ONE Live STAR' },
-  { id: 'okayama1004',  name: '10/04 岡山 CRAZY MAMA 2nd Room' },
-  { id: 'kyoto1015',    name: '10/15 京都 KYOTO MUSE' },
-  { id: 'kobe1016',     name: '10/16 神戸 太陽と虎' },
-  { id: 'mito1023',     name: '10/23 水戸 LIGHT HOUSE' },
-  { id: 'kagoshima1030',name: '10/30 鹿児島 SR HALL' },
-  { id: 'fukuoka1031',  name: '10/31 福岡 LIVE HOUSE OP\'s' },
-  { id: 'kanazawa1112', name: '11/12 石川 金沢vanvan V4' },
-  { id: 'niigata1113',  name: '11/13 新潟 CLUB RIVERST' },
-  { id: 'yokohama1120', name: '11/20 横浜 F.A.D YOKOHAMA' },
-  { id: 'nagano1123',   name: '11/23 長野 上諷訪clubrockhearts' },
+  { id: 'osaka0802',    name: '08/02 大阪 UMEDA CLUB QUATTRO',      date: '2025-08-02' },
+  { id: 'nagoya0807',   name: '08/07 名古屋 新栄シャングリラ',          date: '2025-08-07' },
+  { id: 'tokyo0824',    name: '08/24 東京 Zepp Shinjuku',             date: '2025-08-24' },
+  { id: 'sendai0904',   name: '09/04 仙台 ROCKATERIA',                date: '2025-09-04' },
+  { id: 'morioka0905',  name: '09/05 盛岡 the five morioka',          date: '2025-09-05' },
+  { id: 'sapporo0920',  name: '09/20 札幌 KLUB COUNTER ACTION',       date: '2025-09-20' },
+  { id: 'shizuoka0911', name: '09/11 静岡 UMBER',                     date: '2025-09-11' },
+  { id: 'chiba0923',    name: '09/23 千葉 LOOK',                      date: '2025-09-23' },
+  { id: 'takamatsu1001',name: '10/01 高松 TOONICE',                   date: '2025-10-01' },
+  { id: 'hiroshima1003',name: '10/03 広島 SIX ONE Live STAR',         date: '2025-10-03' },
+  { id: 'okayama1004',  name: '10/04 岡山 CRAZY MAMA 2nd Room',       date: '2025-10-04' },
+  { id: 'kyoto1015',    name: '10/15 京都 KYOTO MUSE',                date: '2025-10-15' },
+  { id: 'kobe1016',     name: '10/16 神戸 太陽と虎',                   date: '2025-10-16' },
+  { id: 'mito1023',     name: '10/23 水戸 LIGHT HOUSE',               date: '2025-10-23' },
+  { id: 'kagoshima1030',name: '10/30 鹿児島 SR HALL',                 date: '2025-10-30' },
+  { id: 'fukuoka1031',  name: '10/31 福岡 LIVE HOUSE OP\'s',          date: '2025-10-31' },
+  { id: 'kanazawa1112', name: '11/12 石川 金沢vanvan V4',              date: '2025-11-12' },
+  { id: 'niigata1113',  name: '11/13 新潟 CLUB RIVERST',              date: '2025-11-13' },
+  { id: 'yokohama1120', name: '11/20 横浜 F.A.D YOKOHAMA',            date: '2025-11-20' },
+  { id: 'nagano1123',   name: '11/23 長野 上諏訪clubrockhearts',       date: '2025-11-23' },
 ];
 // ▲▲▲ ここまで ▲▲▲
 
@@ -757,6 +757,12 @@ function handleScanResult(text){
   if(!venue){
     showToast('登録されていない会場のQRです', true);
     return;
+  }
+  // 当日チェック（端末のローカル日付で判定）
+  if(venue.date){
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+    if(today !== venue.date) return; // 当日以外は無反応
   }
   if(myStamps[venueId]){
     showToast(`${venue.name} のスタンプは既に押されています`, false);
