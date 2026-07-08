@@ -760,12 +760,12 @@ function handleScanResult(text){
     showToast('登録されていない会場のQRです', true);
     return;
   }
-  // 当日チェック（端末のローカル日付で判定）
-  if(venue.date){
-    const now = new Date();
-    const today = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
-    if(today !== venue.date) return; // 当日以外は無反応
-  }
+  // 当日チェック（土曜日に再度有効化予定）
+  // if(venue.date){
+  //   const now = new Date();
+  //   const today = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+  //   if(today !== venue.date) return;
+  // }
   if(myStamps[venueId]){
     showToast(`${venue.name} のスタンプは既に押されています`, false);
   }else{

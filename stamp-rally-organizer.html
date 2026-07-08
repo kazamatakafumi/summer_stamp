@@ -184,6 +184,7 @@ loadScriptWithFallback([
     border:2px solid var(--black);
     display:flex;align-items:center;justify-content:center;
   }
+  .scan-box video{width:100%;height:100%;object-fit:cover;}
   .scan-box img{width:100%;height:100%;object-fit:cover;}
   .scan-placeholder{
     color:#9fd6b6;text-align:center;font-size:13px;padding:0 30px;
@@ -277,15 +278,17 @@ loadScriptWithFallback([
     <!-- ===== 読み取る ===== -->
     <section class="screen" id="screen-scan">
       <div class="scan-box" id="scanBox">
-        <div class="scan-placeholder">
+        <video id="scanVideo" playsinline muted style="width:100%;height:100%;object-fit:cover;display:none;"></video>
+        <div class="scan-placeholder" id="scanPlaceholder">
           <div class="scan-placeholder-icon">📷</div>
-          <div>下のボタンから会場のQRを撮影してください</div>
+          <div>下のボタンからQRを読み取ってください</div>
         </div>
         <div class="scan-frame"></div>
       </div>
-      <div class="scan-hint">会場入口のQRコードがフレームの中に入るように撮影してください</div>
-      <button class="btn btn-primary" id="captureBtn">QRを撮影する</button>
-      <button class="btn btn-ghost" id="fileScanBtn">アルバムから選ぶ</button>
+      <div class="scan-hint">会場入口のQRコードをカメラに向けてください</div>
+      <button class="btn btn-primary" id="captureBtn" style="display:none;">QRを撮影する</button>
+      <button class="btn btn-primary" id="startCameraBtn" style="display:none;">カメラで読み取る</button>
+      <button class="btn btn-ghost" id="fileScanBtn">アルバム・ファイルから選ぶ</button>
       <input type="file" id="captureInput" accept="image/*" capture="environment" style="display:none;">
       <input type="file" id="fileInput" accept="image/*" style="display:none;">
       <div class="toast" id="scanToast"></div>
@@ -387,6 +390,11 @@ document.querySelectorAll('nav.tabs button').forEach(btn=>{
     document.getElementById('screen-'+btn.dataset.tab).classList.add('active');
     if(btn.dataset.tab === 'organizer') renderOrganizer();
     document.body.classList.toggle('tab-scan', btn.dataset.tab === 'scan');
+    if(btn.dataset.tab !== 'scan' && typeof stopCamera === 'function'){
+      stopCamera();
+      const b = document.getElementById('startCameraBtn');
+      if(b) b.textContent = 'カメラで読み取る';
+    }
   });
 });
 
@@ -565,104 +573,163 @@ document.getElementById('resetMyStampsBtn').addEventListener('click', ()=>{
   renderBook();
 });
 
-// ---------- scanning (capture-based, no getUserMedia) ----------
+// ---------- scanning ----------
 const scanToast = document.getElementById('scanToast');
 const scanBox = document.getElementById('scanBox');
+const scanVideo = document.getElementById('scanVideo');
+const scanPlaceholder = document.getElementById('scanPlaceholder');
+
+const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+document.getElementById('captureBtn').style.display = 'none';
+document.getElementById('startCameraBtn').style.display = 'block';
 
 function showToast(msg, isError){
   scanToast.textContent = msg;
   scanToast.className = 'toast show' + (isError ? ' error' : '');
   clearTimeout(showToast._t);
-  showToast._t = setTimeout(()=>{ scanToast.classList.remove('show'); }, 2600);
+  showToast._t = setTimeout(()=>{ scanToast.classList.remove('show'); }, 3500);
 }
 
-const canvas = document.createElement('canvas');
-const ctx = canvas.getContext('2d');
-
-function tryDecode(imgData){
-  return jsQR(imgData.data, imgData.width, imgData.height, { inversionAttempts: 'attemptBoth' });
-}
-
-function waitForLib(getter, statusKey, timeoutMs){
-  return new Promise((resolve)=>{
-    const start = Date.now();
-    (function check(){
-      if(typeof getter() !== 'undefined'){ resolve(true); return; }
-      if(window.__qrLibStatus && window.__qrLibStatus[statusKey] === 'failed'){ resolve(false); return; }
-      if(Date.now() - start > timeoutMs){ resolve(false); return; }
-      setTimeout(check, 150);
-    })();
-  });
-}
-
-async function decodeImageFile(file){
-  const ready = await waitForLib(()=> window.jsQR, 'jsQR', 6000);
-  if(!ready){
-    showToast('QR読み取り用ライブラリの読み込みに失敗しました。通信状況を確認して、ページを再読み込みしてください', true);
-    return;
-  }
-  const img = new Image();
-  img.onload = ()=>{
-    try{
-      // プレビュー表示
-      scanBox.innerHTML = '';
-      const preview = document.createElement('img');
-      preview.src = img.src;
-      scanBox.appendChild(preview);
-      const frame = document.createElement('div');
-      frame.className = 'scan-frame';
-      scanBox.appendChild(frame);
-
-      // 巨大な写真は処理が重くなる/失敗しやすいので、長辺1600pxくらいに縮小する
-      const MAX_DIM = 1600;
-      let w = img.width, h = img.height;
-      const scale = Math.min(1, MAX_DIM / Math.max(w, h));
-      w = Math.round(w * scale);
-      h = Math.round(h * scale);
-
-      canvas.width = w;
-      canvas.height = h;
-      ctx.drawImage(img, 0, 0, w, h);
-      let imgData = ctx.getImageData(0, 0, w, h);
-      let code = tryDecode(imgData);
-
-      if(!code){
-        // 中央をクロップして拡大した状態でもう一度試す（QRが小さく/隅に写っている場合のフォールバック）
-        const cropSize = Math.round(Math.min(w, h) * 0.7);
-        const sx = Math.round((w - cropSize) / 2);
-        const sy = Math.round((h - cropSize) / 2);
-        const upCanvas = document.createElement('canvas');
-        const upCtx = upCanvas.getContext('2d');
-        const upSize = 900;
-        upCanvas.width = upSize;
-        upCanvas.height = upSize;
-        upCtx.drawImage(canvas, sx, sy, cropSize, cropSize, 0, 0, upSize, upSize);
-        const cropData = upCtx.getImageData(0, 0, upSize, upSize);
-        code = tryDecode(cropData);
-      }
-
-      if(code){
-        handleScanResult(code.data);
-      }else{
-        showToast('QRコードを認識できませんでした。明るい場所で、枠内に大きく・正面から写してもう一度お試しください', true);
-      }
-    }catch(err){
-      console.error('QR decode error:', err);
-      showToast('読み取り処理でエラーが発生しました。もう一度お試しください', true);
+let jsQRLoadPromise = null;
+function ensureJsQR(){
+  if(typeof jsQR !== 'undefined') return Promise.resolve();
+  if(jsQRLoadPromise) return jsQRLoadPromise;
+  const fallbackUrls = [
+    'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js',
+    'https://unpkg.com/jsqr@1.4.0/dist/jsQR.js'
+  ];
+  jsQRLoadPromise = new Promise((resolve, reject)=>{
+    let i = 0;
+    function tryNext(){
+      if(typeof jsQR !== 'undefined'){ resolve(); return; }
+      if(i >= fallbackUrls.length){ reject(new Error('jsQR failed to load from all sources')); return; }
+      const s = document.createElement('script');
+      s.src = fallbackUrls[i++];
+      s.onload = ()=>{ if(typeof jsQR !== 'undefined') resolve(); else tryNext(); };
+      s.onerror = tryNext;
+      document.head.appendChild(s);
     }
-  };
-  img.onerror = ()=>{
-    showToast('画像を読み込めませんでした。別の画像で試すか、写真の形式（HEICなど）を確認してください', true);
-  };
-  // blob: URLが使えない環境でも読めるよう、FileReaderでdata URLとして読み込む
-  const reader = new FileReader();
-  reader.onload = (e)=>{
-    img.src = e.target.result;
-  };
-  reader.onerror = ()=>{
-    showToast('ファイルを読み込めませんでした', true);
-  };
-  reader.readAsDataURL(file);
+    tryNext();
+  });
+  return jsQRLoadPromise;
+}
+
+let scannerState = null;
+
+function stopCamera(){
+  if(scannerState){
+    if(scannerState.timer) clearTimeout(scannerState.timer);
+    if(scannerState.stream) scannerState.stream.getTracks().forEach(t=>t.stop());
+    scannerState = null;
+  }
+  scanVideo.style.display = 'none';
+  scanVideo.srcObject = null;
+  scanPlaceholder.style.display = '';
+}
+
+const scanCanvas = document.createElement('canvas');
+const scanCtx = scanCanvas.getContext('2d', { willReadFrequently: true });
+
+function schedTick(){
+  if(!scannerState) return;
+  scannerState.timer = setTimeout(()=>{
+    try{ tickScanner(); }catch(e){ console.error('scan tick error', e); }
+    schedTick();
+  }, 180);
+}
+
+function tickScanner(){
+  if(!scannerState) return;
+  if(scanVideo.readyState < 2 || !scanVideo.videoWidth) return;
+  if(typeof jsQR === 'undefined') return;
+  const vw = scanVideo.videoWidth, vh = scanVideo.videoHeight;
+  const scale = Math.min(1, 800 / Math.max(vw, vh));
+  const cw = Math.round(vw * scale), ch = Math.round(vh * scale);
+  scanCanvas.width = cw; scanCanvas.height = ch;
+  scanCtx.drawImage(scanVideo, 0, 0, cw, ch);
+  const imgData = scanCtx.getImageData(0, 0, cw, ch);
+  const code = jsQR(imgData.data, imgData.width, imgData.height, { inversionAttempts: 'attemptBoth' });
+  if(code){
+    stopCamera();
+    document.getElementById('startCameraBtn').textContent = 'カメラで読み取る';
+    handleScanResult(code.data);
+  }
+}
+
+function startCamera(){
+  if(scannerState) return;
+  showToast('カメラを起動しています…', false);
+  ensureJsQR()
+    .then(()=> navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' } }
+    }))
+    .then(stream=>{
+      scannerState = { stream, timer: null };
+      scanVideo.srcObject = stream;
+      scanVideo.setAttribute('playsinline', true);
+      scanVideo.setAttribute('autoplay', true);
+      scanVideo.style.display = 'block';
+      scanPlaceholder.style.display = 'none';
+      scanVideo.play();
+      scanToast.className = 'toast';
+      document.getElementById('startCameraBtn').textContent = 'カメラを停止する';
+      schedTick();
+    })
+    .catch(err=>{
+      console.error('camera error:', err);
+      stopCamera();
+      if(isIOS){
+        showToast('カメラが起動できませんでした。Safariの設定→このサイト→カメラを「許可」にしてください', true);
+      }else{
+        showToast('カメラにアクセスできませんでした。ブラウザの権限設定を確認してください', true);
+      }
+    });
+}
+
+document.getElementById('startCameraBtn').addEventListener('click', ()=>{
+  if(scannerState){
+    stopCamera();
+    document.getElementById('startCameraBtn').textContent = 'カメラで読み取る';
+  }else{
+    startCamera();
+  }
+});
+
+function decodeImageFile(file){
+  const imgCanvas = document.createElement('canvas');
+  const imgCtx = imgCanvas.getContext('2d', { willReadFrequently: true });
+  ensureJsQR()
+    .then(()=> new Promise((resolve, reject)=>{
+      const reader = new FileReader();
+      reader.onload = e=>{
+        const img = new Image();
+        img.onload = ()=> resolve(img);
+        img.onerror = ()=> reject(new Error('image load error'));
+        img.src = e.target.result;
+      };
+      reader.onerror = ()=> reject(new Error('file read error'));
+      reader.readAsDataURL(file);
+    }))
+    .then(img=>{
+      const scale = Math.min(1, 1600 / Math.max(img.width, img.height));
+      const w = Math.round(img.width * scale), h = Math.round(img.height * scale);
+      imgCanvas.width = w; imgCanvas.height = h;
+      imgCtx.drawImage(img, 0, 0, w, h);
+      let code = jsQR(imgCtx.getImageData(0,0,w,h).data, w, h, { inversionAttempts: 'attemptBoth' });
+      if(!code){
+        const crop = Math.round(Math.min(w,h)*0.7);
+        const sx = Math.round((w-crop)/2), sy = Math.round((h-crop)/2);
+        const c2 = document.createElement('canvas'); c2.width = c2.height = 900;
+        c2.getContext('2d').drawImage(imgCanvas, sx, sy, crop, crop, 0, 0, 900, 900);
+        code = jsQR(c2.getContext('2d').getImageData(0,0,900,900).data, 900, 900, { inversionAttempts: 'attemptBoth' });
+      }
+      if(code){ handleScanResult(code.data); }
+      else{ showToast('QRコードを認識できませんでした。QRが大きく・正面から写っている画像で試してください', true); }
+    })
+    .catch(err=>{
+      console.error('decode error:', err);
+      showToast('読み取りに失敗しました。もう一度お試しください', true);
+    });
 }
 
 document.getElementById('captureBtn').addEventListener('click', ()=>{
