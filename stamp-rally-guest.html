@@ -638,9 +638,11 @@ function tickScanner(){
   const imgData = scanCtx.getImageData(0, 0, cw, ch);
   const code = jsQR(imgData.data, imgData.width, imgData.height, { inversionAttempts: 'attemptBoth' });
   if(code){
-    stopCamera();
-    document.getElementById('startCameraBtn').textContent = 'カメラで読み取る';
-    handleScanResult(code.data);
+    const result = handleScanResult(code.data);
+    if(result === 'ok'){
+      stopCamera();
+      document.getElementById('startCameraBtn').textContent = 'カメラで読み取る';
+    }
   }
 }
 
