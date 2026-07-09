@@ -11,7 +11,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=RocknRoll+One&family=Zen+Kaku+Gothic+New:wght@400;500;700;900&display=swap" rel="stylesheet">
 <script>
-// 複数のCDNを順番に試す読み込み処理（1つのCDNがブロックされていても他で読み込めるようにする）
+// jsQRを起動時にベストエフォートで先読み
 function loadScriptWithFallback(urls, onDone){
   let i = 0;
   function tryNext(){
@@ -26,17 +26,11 @@ function loadScriptWithFallback(urls, onDone){
   }
   tryNext();
 }
-window.__qrLibStatus = { qrcode: 'loading', jsQR: 'loading' };
-loadScriptWithFallback([
-  'https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js',
-  'https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js',
-  'https://unpkg.com/qrcode-generator@1.4.4/qrcode.min.js'
-], (ok)=>{ window.__qrLibStatus.qrcode = ok ? 'ok' : 'failed'; });
 loadScriptWithFallback([
   'https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.js',
   'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js',
   'https://unpkg.com/jsqr@1.4.0/dist/jsQR.js'
-], (ok)=>{ window.__qrLibStatus.jsQR = ok ? 'ok' : 'failed'; });
+], ()=>{});
 </script>
 <style>
   :root{
@@ -447,40 +441,27 @@ function escapeHtml(s){
 }
 
 // ---------- organizer (表示専用。会場リストはファイル先頭のVENUES定数で管理) ----------
-async function renderSingleQr(container, venue){
-  container.innerHTML = '<p class="muted">読み込み中...</p>';
-  try{
-    await ensureQrCode();
-  }catch(e){
-    container.innerHTML = '<p class="muted">QR生成用ライブラリの読み込みに失敗しました。通信状況を確認して、ページを再読み込みしてください。</p>';
-    return;
-  }
+// QRコードをAPIで生成（JSライブラリ不要・CDN不要）
+function makeQrImgUrl(text, size){
+  return 'https://api.qrserver.com/v1/create-qr-code/?data=' + encodeURIComponent(text)
+    + '&size=' + size + 'x' + size + '&ecc=H&margin=4&color=000000&bgcolor=ffffff';
+}
+
+function renderSingleQr(container, venue){
   container.innerHTML = '';
   const card = document.createElement('div');
   card.className = 'qr-card';
   const imgWrap = document.createElement('div');
   imgWrap.className = 'qrimg';
+  const img = document.createElement('img');
+  img.src = makeQrImgUrl('STAMP:' + venue.id, 280);
+  img.width = 180; img.height = 180;
+  img.alt = venue.name;
+  img.onerror = ()=>{ imgWrap.innerHTML = '<p class="muted" style="color:#c00">QR画像の読み込みに失敗しました。通信状況を確認してください。</p>'; };
+  imgWrap.appendChild(img);
   card.innerHTML = `<div class="label">${escapeHtml(venue.name)}</div>`;
   card.insertBefore(imgWrap, card.firstChild);
   container.appendChild(card);
-  try{
-    // typeNumber=0で自動選択、誤り訂正レベルH（多少汚れても読める）
-    const qr = qrcode(0, 'H');
-    qr.addData('STAMP:' + venue.id);
-    qr.make();
-    // セルサイズを大きめに、マージン(クワイエットゾーン)を確保して読み取り精度を上げる
-    imgWrap.innerHTML = qr.createSvgTag({cellSize: 8, margin: 4});
-    const svg = imgWrap.querySelector('svg');
-    if(svg){
-      svg.style.width = '180px';
-      svg.style.height = '180px';
-      svg.style.display = 'block';
-      svg.style.margin = '0 auto';
-    }
-  }catch(err){
-    console.error('QR generate error:', err);
-    imgWrap.innerHTML = '<p class="muted">生成に失敗しました</p>';
-  }
 }
 
 function renderOrganizer(){
@@ -504,13 +485,13 @@ function renderOrganizer(){
     qrArea.style.display = 'none';
 
     const toggleBtn = item.querySelector('.btn-qr-toggle');
-    toggleBtn.addEventListener('click', async ()=>{
+    toggleBtn.addEventListener('click', ()=>{
       const isHidden = qrArea.style.display === 'none';
       if(isHidden){
         qrArea.style.display = 'grid';
         toggleBtn.textContent = '閉じる';
         if(!qrArea.dataset.rendered){
-          await renderSingleQr(qrArea, v);
+          renderSingleQr(qrArea, v);
           qrArea.dataset.rendered = '1';
         }
       }else{
@@ -526,43 +507,23 @@ function renderOrganizer(){
   document.getElementById('qrGrid').innerHTML = '';
 }
 
-document.getElementById('genQrBtn').addEventListener('click', async ()=>{
+document.getElementById('genQrBtn').addEventListener('click', ()=>{
   const qrGrid = document.getElementById('qrGrid');
-  qrGrid.innerHTML = '<p class="muted">読み込み中...</p>';
-  try{
-    await ensureQrCode();
-  }catch(e){
-    qrGrid.innerHTML = '<p class="muted">QR生成用ライブラリの読み込みに失敗しました。通信状況を確認して、ページを再読み込みしてください。</p>';
-    return;
-  }
   qrGrid.innerHTML = '';
   venues.forEach(v=>{
     const card = document.createElement('div');
     card.className = 'qr-card';
     const imgWrap = document.createElement('div');
     imgWrap.className = 'qrimg';
+    const img = document.createElement('img');
+    img.src = makeQrImgUrl('STAMP:' + v.id, 280);
+    img.width = 140; img.height = 140;
+    img.alt = v.name;
+    img.onerror = ()=>{ imgWrap.innerHTML = '<p class="muted" style="color:#c00">読み込み失敗</p>'; };
+    imgWrap.appendChild(img);
     card.innerHTML = `<div class="label">${escapeHtml(v.name)}</div>`;
     card.insertBefore(imgWrap, card.firstChild);
     qrGrid.appendChild(card);
-
-    try{
-      // typeNumber=0で自動選択、誤り訂正レベルH（多少汚れても読める）
-      const qr = qrcode(0, 'H');
-      qr.addData('STAMP:' + v.id);
-      qr.make();
-      // セルサイズを大きめに、マージン(クワイエットゾーン)を確保して読み取り精度を上げる
-      imgWrap.innerHTML = qr.createSvgTag({cellSize: 8, margin: 4});
-      const svg = imgWrap.querySelector('svg');
-      if(svg){
-        svg.style.width = '140px';
-        svg.style.height = '140px';
-        svg.style.display = 'block';
-        svg.style.margin = '0 auto';
-      }
-    }catch(err){
-      console.error('QR generate error:', err);
-      imgWrap.innerHTML = '<p class="muted">生成に失敗しました</p>';
-    }
   });
   if(venues.length===0){
     qrGrid.innerHTML = '<p class="muted">まず会場を追加してください。</p>';
@@ -616,44 +577,7 @@ function ensureJsQR(){
   return jsQRLoadPromise;
 }
 
-// QR生成ライブラリの読み込み待ち（qrcode-generatorはCDNローダーで非同期読み込み済み）
-function waitForLib(getter, statusKey, timeoutMs){
-  return new Promise((resolve)=>{
-    const start = Date.now();
-    (function check(){
-      if(typeof getter() !== 'undefined'){ resolve(true); return; }
-      if(window.__qrLibStatus && window.__qrLibStatus[statusKey] === 'failed'){ resolve(false); return; }
-      if(Date.now() - start > timeoutMs){ resolve(false); return; }
-      setTimeout(check, 150);
-    })();
-  });
-}
-
-// qrcode-generatorも使う直前に確実に読み込む
-let qrcodeLoadPromise = null;
-function ensureQrCode(){
-  if(typeof qrcode !== 'undefined') return Promise.resolve();
-  if(qrcodeLoadPromise) return qrcodeLoadPromise;
-  const urls = [
-    'https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js',
-    'https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js',
-    'https://unpkg.com/qrcode-generator@1.4.4/qrcode.min.js'
-  ];
-  qrcodeLoadPromise = new Promise((resolve, reject)=>{
-    let i = 0;
-    function tryNext(){
-      if(typeof qrcode !== 'undefined'){ resolve(); return; }
-      if(i >= urls.length){ reject(new Error('qrcode-generator failed to load')); return; }
-      const s = document.createElement('script');
-      s.src = urls[i++];
-      s.onload = ()=>{ if(typeof qrcode !== 'undefined') resolve(); else tryNext(); };
-      s.onerror = ()=>{ tryNext(); };
-      document.head.appendChild(s);
-    }
-    tryNext();
-  });
-  return qrcodeLoadPromise;
-}
+// QR生成ライブラリ不要のためwaitForLib/ensureQrCodeは削除済み
 
 let scannerState = null;
 
