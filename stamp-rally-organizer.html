@@ -614,6 +614,19 @@ function ensureJsQR(){
   return jsQRLoadPromise;
 }
 
+// QR生成ライブラリの読み込み待ち（qrcode-generatorはCDNローダーで非同期読み込み済み）
+function waitForLib(getter, statusKey, timeoutMs){
+  return new Promise((resolve)=>{
+    const start = Date.now();
+    (function check(){
+      if(typeof getter() !== 'undefined'){ resolve(true); return; }
+      if(window.__qrLibStatus && window.__qrLibStatus[statusKey] === 'failed'){ resolve(false); return; }
+      if(Date.now() - start > timeoutMs){ resolve(false); return; }
+      setTimeout(check, 150);
+    })();
+  });
+}
+
 let scannerState = null;
 
 function stopCamera(){
