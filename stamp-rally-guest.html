@@ -285,7 +285,7 @@ loadScriptWithFallback([
   }
   .muted{color:#a9d8bc;font-size:12px;}
   footer{padding:14px 20px 28px;text-align:center;font-size:11px;color:#6fa386;}
-  footer .cache-warning{display:inline-block;margin-top:6px;padding:5px 12px;background:rgba(0,0,0,.25);border:1px solid rgba(255,255,255,.15);border-radius:999px;font-size:11px;color:#d4c9a0;}
+  /* footer .cache-warning{display:inline-block;margin-top:6px;padding:5px 12px;background:rgba(0,0,0,.25);border:1px solid rgba(255,255,255,.15);border-radius:999px;font-size:11px;color:#d4c9a0;} */
   body.tab-scan footer{display:none;}
   body.tab-scan header .title-banner{max-height:64px;overflow:hidden;}
   body.tab-scan header .sub{display:none;}
@@ -365,7 +365,7 @@ loadScriptWithFallback([
 
   </main>
 
-  <footer>スタンプの記録はこの端末のブラウザに保存されます<br><span class="cache-warning">⚠️ キャッシュをクリアするとデータが消えます</span></footer>
+  <footer>スタンプの記録はこの端末のブラウザに保存されます</footer>
 </div>
 
 <svg style="display:none;">
@@ -521,11 +521,18 @@ function renderRewards(stampedCount){
   let claimedCount = 0;
   REWARDS.forEach(r=>{
     const unlocked = stampedCount >= r.threshold;
-    const claimed = !!claims[r.id];
+    const claimed = unlocked && !!claims[r.id];
     if(claimed) claimedCount++;
 
     const card = document.createElement('div');
-    card.className = 'reward-card ' + (claimed ? 'claimed' : (unlocked ? 'unlocked' : 'locked'));
+    // unlocked（スタンプ数がしきい値に到達）を最優先の条件とする。
+    // claimed（スタッフが「済」を押した）は、unlocked状態の上に重ねる派生ステータス。
+    // 万一、スタンプ未達成なのにclaimedデータが残っていても、見た目はlocked（グレーアウト）を優先する。
+    let cls;
+    if(unlocked && claimed) cls = 'unlocked claimed';
+    else if(unlocked) cls = 'unlocked';
+    else cls = 'locked';
+    card.className = 'reward-card ' + cls;
 
     let hint = '';
     if(!unlocked){
