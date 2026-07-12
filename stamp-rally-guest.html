@@ -336,6 +336,18 @@ loadScriptWithFallback([
       <input type="file" id="captureInput" accept="image/*" capture="environment" style="display:none;">
       <input type="file" id="fileInput" accept="image/*" style="display:none;">
       <div class="toast" id="scanToast"></div>
+
+      <!-- QR検出後の確認ダイアログ -->
+      <div id="scanConfirmOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:50;align-items:center;justify-content:center;">
+        <div style="background:#fff;color:#111;border-radius:16px;padding:24px 20px;max-width:320px;width:85%;text-align:center;box-shadow:0 8px 30px rgba(0,0,0,0.3);">
+          <div id="scanConfirmVenueName" style="font-size:1.1em;font-weight:700;margin-bottom:6px;"></div>
+          <div id="scanConfirmMessage" style="font-size:0.95em;color:#444;margin-bottom:18px;"></div>
+          <div style="display:flex;gap:10px;">
+            <button id="scanConfirmCancelBtn" type="button" style="flex:1;padding:12px 0;border-radius:10px;border:1px solid #ccc;background:#f5f5f5;color:#333;font-weight:600;">キャンセル</button>
+            <button id="scanConfirmOkBtn" type="button" style="flex:1;padding:12px 0;border-radius:10px;border:none;background:var(--indigo,#00A942);color:#fff;font-weight:700;">スタンプを押す</button>
+          </div>
+        </div>
+      </div>
     </section>
 
     <!-- ===== 特典 ===== -->
@@ -420,11 +432,14 @@ document.querySelectorAll('nav.tabs button').forEach(btn=>{
     document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
     document.getElementById('screen-'+btn.dataset.tab).classList.add('active');
     document.body.classList.toggle('tab-scan', btn.dataset.tab === 'scan');
-    // スキャンタブを離れたらカメラ停止（stopCameraはscanningブロックで定義）
-    if(btn.dataset.tab !== 'scan' && typeof stopCamera === 'function'){
-      stopCamera();
+    // スキャンタブを離れたらカメラ停止・確認ダイアログも閉じる（各関数はscanningブロックで定義）
+    if(btn.dataset.tab !== 'scan'){
+      if(typeof stopCamera === 'function') stopCamera();
       const btn2 = document.getElementById('startCameraBtn');
       if(btn2) btn2.textContent = 'カメラで読み取る';
+      const overlay = document.getElementById('scanConfirmOverlay');
+      if(overlay) overlay.style.display = 'none';
+      if(typeof pendingVenueId !== 'undefined') pendingVenueId = null;
     }
   });
 });
@@ -475,13 +490,12 @@ function renderBook(){
 }
 
 // ---------- rewards ----------
-// ▼▼▼ 特典はここを直接編集してください（しきい値・景品名はプレースホルダーです） ▼▼▼
+// ▼▼▼ 特典はここを直接編集してください ▼▼▼
 const REWARDS = [
-  { id: 'r1', threshold: 3,  name: '【仮】特典A（3個達成）' },
-  { id: 'r2', threshold: 5,  name: '【仮】特典B（5個達成）' },
-  { id: 'r3', threshold: 7,  name: '【仮】特典C（7個達成）' },
-  { id: 'r4', threshold: 10, name: '【仮】特典D（10個達成）' },
-  { id: 'r5', threshold: 15, name: '【仮】特典E（15個達成）' },
+  { id: 'r1', threshold: 3,  name: '面白いやつあげる！（あとで解禁）' },
+  { id: 'r2', threshold: 5,  name: 'メンバー手作りピック！' },
+  { id: 'r4', threshold: 10, name: 'あなたのためだけに歌います券', note: '※決められた日時になります（東京開催）\n来れなかったら…なんか代わりにあげます' },
+  { id: 'r5', threshold: 15, name: 'めっちゃ面白いやつあげる！\n（あとで解禁）' },
 ];
 // ▲▲▲ ここまで ▲▲▲
 
@@ -524,7 +538,8 @@ function renderRewards(stampedCount){
       <div class="reward-badge">${r.threshold}個</div>
       <div class="reward-info">
         <div class="req">スタンプ${r.threshold}個で解放</div>
-        <div class="name">${escapeHtml(r.name)}</div>
+        <div class="name">${escapeHtml(r.name).replace(/\n/g,'<br>')}</div>
+        ${r.note ? `<div class="note" style="font-size:0.82em;color:#888;margin-top:4px;line-height:1.5;">${escapeHtml(r.note).replace(/\n/g,'<br>')}</div>` : ''}
         ${hint ? `<div class="hint">${escapeHtml(hint)}</div>` : ''}
       </div>
       <div class="reward-stamp-mark">${stampSvg('済')}</div>
@@ -638,11 +653,7 @@ function tickScanner(){
   const imgData = scanCtx.getImageData(0, 0, cw, ch);
   const code = jsQR(imgData.data, imgData.width, imgData.height, { inversionAttempts: 'attemptBoth' });
   if(code){
-    const result = handleScanResult(code.data);
-    if(result === 'ok'){
-      stopCamera();
-      document.getElementById('startCameraBtn').textContent = 'カメラで読み取る';
-    }
+    handleScanResult(code.data);
   }
 }
 
@@ -749,15 +760,32 @@ document.getElementById('fileInput').addEventListener('change', (e)=>{
   e.target.value = '';
 });
 
+// QR検出→確認ダイアログ→OKで確定、という2段階フローに変更
+// （カメラに映っただけで即スタンプが押されてしまうのを防ぐため）
+let pendingVenueId = null;
+let lastInvalidToastAt = 0;
+
 function handleScanResult(text){
+  if(pendingVenueId){
+    // 既に確認ダイアログ表示中は何もしない
+    return;
+  }
   if(!text.startsWith('STAMP:')){
-    showToast('このQRはスタンプ用ではありません', true);
+    const now = Date.now();
+    if(now - lastInvalidToastAt > 2000){
+      showToast('このQRはスタンプ用ではありません', true);
+      lastInvalidToastAt = now;
+    }
     return;
   }
   const venueId = text.slice(6);
   const venue = venues.find(v=>v.id===venueId);
   if(!venue){
-    showToast('登録されていない会場のQRです', true);
+    const now = Date.now();
+    if(now - lastInvalidToastAt > 2000){
+      showToast('登録されていない会場のQRです', true);
+      lastInvalidToastAt = now;
+    }
     return;
   }
   // 当日チェック（土曜日に再度有効化予定）
@@ -766,14 +794,56 @@ function handleScanResult(text){
   //   const today = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
   //   if(today !== venue.date) return;
   // }
+
+  // カメラでの連続検出を止める（ダイアログ表示中は再スキャンしない）
+  if(scannerState && scannerState.timer){
+    clearTimeout(scannerState.timer);
+    scannerState.timer = null;
+  }
+
+  pendingVenueId = venueId;
+  const nameEl = document.getElementById('scanConfirmVenueName');
+  const msgEl = document.getElementById('scanConfirmMessage');
+  const okBtn = document.getElementById('scanConfirmOkBtn');
+  nameEl.textContent = venue.name;
   if(myStamps[venueId]){
-    showToast(`${venue.name} のスタンプは既に押されています`, false);
+    msgEl.textContent = 'このスタンプは既に押されています。';
+    okBtn.style.display = 'none';
   }else{
+    msgEl.textContent = 'このスタンプを押しますか？';
+    okBtn.style.display = '';
+  }
+  document.getElementById('scanConfirmOverlay').style.display = 'flex';
+}
+
+function resumeScanIfActive(){
+  // カメラ起動中なら、ダイアログを閉じたタイミングでスキャンループを再開
+  if(scannerState && !scannerState.timer){
+    schedTick();
+  }
+}
+
+function confirmStamp(){
+  const venueId = pendingVenueId;
+  pendingVenueId = null;
+  document.getElementById('scanConfirmOverlay').style.display = 'none';
+  if(!venueId) return;
+  const venue = venues.find(v=>v.id===venueId);
+  if(!venue) return;
+
+  if(!myStamps[venueId]){
     myStamps[venueId] = true;
     saveMyStamps();
     showToast(`${venue.name} のスタンプを押しました！`, false);
   }
-  // switch to card tab and animate
+
+  // カメラを使っていた場合は停止してからスタンプ帖タブへ
+  if(scannerState){
+    stopCamera();
+    const btn2 = document.getElementById('startCameraBtn');
+    if(btn2) btn2.textContent = 'カメラで読み取る';
+  }
+
   document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.remove('active'));
   document.querySelector('nav.tabs button[data-tab="card"]').classList.add('active');
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
@@ -786,6 +856,15 @@ function handleScanResult(text){
     setTimeout(()=>slot.classList.remove('just-stamped'), 500);
   }
 }
+
+function cancelStamp(){
+  pendingVenueId = null;
+  document.getElementById('scanConfirmOverlay').style.display = 'none';
+  resumeScanIfActive();
+}
+
+document.getElementById('scanConfirmOkBtn').addEventListener('click', confirmStamp);
+document.getElementById('scanConfirmCancelBtn').addEventListener('click', cancelStamp);
 
 // ---------- init ----------
 (function init(){
